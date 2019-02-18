@@ -1,0 +1,235 @@
+# Reset workspace & Load Libraries ----------------------------------------
+    
+  rm(list=ls())
+  for (i in 1:50) gc(reset=T)
+  
+  library(RODBC)
+  library(data.table)
+  library(zoo)
+  library(tm)
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(scales)
+  library(caret)
+  library(caretEnsemble)
+  library(Matrix)
+  library(glmnet)
+	
+  # source("./routines/GetCleanData.R",echo=T)
+
+  df <- fread("df.csv")
+  
+# Remove non-numeric columns --------------------------------------------------
+  
+  df <- select(df,-incurred,-applied) # Remove non-numeric columns
+
+# Remove highly correlated columns --------------------------------------------
+  
+  cor.matrix <- cor(df)
+  cor.matrix[is.na(cor.matrix)] <- 0
+  cor.matrix[is.nan(cor.matrix)] <- 0
+  cor.cols <- findCorrelation(cor.matrix, cutoff = 0.8,exact=T,verbose=F)
+  print(names(df)[cor.cols]) # what am I removing?
+  df <- df[,-cor.cols,with=F]
+  rm(cor.matrix,cor.cols)
+  
+  for (i in 1:50) gc(reset=T)
+  
+# Treat the percentage discretely ---------------------------------------------
+  
+  df$ycurrent <- round(df$ycurrent,2)*100
+  df$yfinal <- round(df$yfinal,2)*100
+  
+# Lag the ycurrent/Days variable by 1:10 steps --------------------------------
+  
+  df <- setorder(df,receivable,Days)
+  
+  i <- 3 # Set number of periods to shift
+  
+  df[,paste0("ycurrent.lag",i,sep=''):=lead(ycurrent,i)-ycurrent,by=receivable]
+  df[,paste0("Days.lag",i,sep=''):=lead(Days,i)-Days, by=receivable] 
+  df <- df[is.na(ycurrent.lag3),paste0("ycurrent.lag",i,sep=''):=ycurrent[which.max(Days)]-ycurrent,by=receivable]
+  df <- df[is.na(Days.lag3),paste0("Days.lag",i,sep=''):=Days[which.max(Days)]-Days,by=receivable]
+  
+  for (i in 1:50) gc(reset=TRUE)
+  
+# Plot ycurrent.lag3 ----------------------------------------------------------
+  
+  df.vis <- df %>%
+    group_by(ycurrent.lag3) %>%
+    summarise(cnt=n()) %>%
+    mutate(log.cnt=log(cnt))
+  
+  clr <- "cornflowerblue"
+  
+  ggplot(df.vis,aes(ycurrent.lag3,log.cnt))+
+    geom_bar(stat="identity",fill=clr,col=clr)+
+    labs(title="Log Frequency of Percent Recovered (Lagged 3 steps) ",
+         x="Percent Recovered after 3 steps/events",
+         y="Log(Frequency)")
+  
+# Plot Days.lag3 --------------------------------------------------------------
+  
+  df.vis <- df %>%
+    mutate(Months.lag3=round(Days.lag3/30,0)) %>%
+    group_by(Months.lag3) %>%
+    summarise(cnt=n()) %>%
+    mutate(log.cnt=log(cnt))
+  
+  clr <- "red"
+  
+  ggplot(df.vis,aes(Months.lag3,log.cnt))+
+    geom_bar(stat="identity",fill=clr,col=clr)+
+    labs(title="Log Frequency of Months Elapsed (Lagged 3 steps) ",
+         x="Months Elapsed after 3 steps/events",
+         y="Log(Frequency)")
+  
+# Poisson Model using glmnet for variable selection ---------------------------
+  
+  # Create (non-negative) y variable for analysis
+    adj <- abs(min(df$ycurrent.lag3))
+    df$ycurrent.poisson <- df$ycurrent.lag3 + adj 
+  
+  # Create sparse Matrix for the response variables
+  
+    sm <- df %>%
+    select(-isactive,
+           -ycurrent,
+           -ycurrent.lag3,
+           -yfinal,
+           -ycurrent.poisson,
+           -receivable) %>%
+    as.matrix() %>%
+    as("sparseMatrix")
+  
+  # Run the glmnet poisson regression  
+    
+  for (i in 1:50) gc(reset=TRUE)
+  
+  p1 <- cv.glmnet(x=sm,y=df$ycurrent.poisson,family="poisson")
+  
+  for (i in 1:50) gc(reset=TRUE)
+  
+  plot(p1)
+  p1
+  
+# Set up list of variables to include in glm poisson
+  
+  coefs <- coef(p1,s="lambda.min") %>%
+    as.matrix() %>% as.data.frame() %>%
+    mutate(response.var=row.names(.),
+           coefficient=`1`) %>%
+    select(-`1`) %>%
+    filter(coefficient!=0) %>%
+    data.table()
+  
+  names(coefs) <- c("coefficient","response.var")
+  include.vars <- coefs$coefficient[-1]
+  
+  print(include.vars)
+  rm(coefs,df.vis,clr,i,sm)
+  
+  for (i in 1:50) gc(reset=TRUE)
+  
+  # GLM poisson using sample size 500,000 and all variables
+  
+  df.sample <- df %>%
+    sample_n(500000) %>%
+    data.table()
+  
+  p2 <- glm(ycurrent.poisson~.-isactive-ycurrent-ycurrent.lag3-yfinal-ycurrent.poisson-receivable,data=df.sample,family="poisson")
+  
+  explained.var <- ((p2$null.deviance-p2$deviance)/p2$deviance)*100
+  print(explained.var)
+  
+  # GLM poisson using sample size 500,000 and variables from glmnet poisson 
+  
+  df.sample2 <- df.sample %>%
+    select(one_of(include.vars),ycurrent.poisson) %>%
+    data.table()
+  
+  p3 <- glm(ycurrent.poisson~.,data=df.sample2,family="poisson")
+  
+  explained.var2 <- ((p3$null.deviance-p3$deviance)/p3$deviance)*100
+  print(explained.var2)
+  
+  for (i in 1:50) gc(reset=TRUE)
+  
+  
+
+  
+  
+  
+
+  
+  
+  
+  
+  
+  
+  
+  
+
+
+  
+  
+  
+  
+  
+
+  
+
+  
+  
+
+  
+
+    
+  
+  
+  
+  
+  
+  
+
+  
+  
+  
+  
+  
+       
+  
+  
+  
+  
+  
+  
+  
+
+    
+
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+  
+
+
+  
+  
+
+
+
+
+
+
+
+
+

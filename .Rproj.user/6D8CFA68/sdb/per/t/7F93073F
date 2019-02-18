@@ -1,0 +1,21 @@
+{
+    "collab_server" : "",
+    "contents" : "# Run Once\n\n.libPaths(\"C:\\\\Users\\\\watsonbe\\\\Documents\\\\R\\\\win-library\\\\3.3\")\n\ninstall.packages(\"RODBC\")\ninstall.packages(\"data.table\")\ninstall.packages(\"zoo\")\ninstall.packages(\"tm\")\ninstall.packages(\"dplyr\")\ninstall.packages(\"tidyr\")\ninstall.packages(\"ggplot2\")\ninstall.packages(\"scales\")\ninstall.packages(\"caret\")\ninstall.packages(\"caretEnsemble\")",
+    "created" : 1487018043825.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "1665689128",
+    "id" : "7F93073F",
+    "lastKnownWriteTime" : 1486760403,
+    "last_content_update" : 1486760403,
+    "path" : "O:/FINANCE/FPAD/8 - Personal Files (PF)/PF - Ben/ARRMS/ARRM Collection Probability Forecast (CPF)/CPF/RUNONCE.R",
+    "project_path" : "RUNONCE.R",
+    "properties" : {
+        "tempName" : "Untitled1"
+    },
+    "relative_order" : 2,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

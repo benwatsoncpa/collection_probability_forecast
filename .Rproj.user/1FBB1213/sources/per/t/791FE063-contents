@@ -1,0 +1,234 @@
+# R Setup ---------------------------------------------------------------------
+
+    # Connect to the ARRMS Database --------------------------------------------
+    arrm<-odbcConnect("ARRM64",
+                      uid="arrm_frms_ro",
+                      pwd="ntU7n_P",
+                      believeNRows=F)
+    
+    # Set up the names of the table -------------------------------------------
+    names.string <- c("receivable",
+                      "isactive",
+                      "applied",
+                      "incurred",
+                      "balance",
+                      "amount",
+                      "type",
+                      "subtype")
+    
+# Get data from ARRM database -------------------------------------------------
+
+    tr <- arrm %>%
+      sqlQuery(source(file="sql/Transactions.sql"),stringsAsFactors=F) %>%
+      data.table()
+
+    # Rename columns
+    names(tr) <- names.string
+  
+    # Negate positive deletion amounts (system issue with database)
+    tr <- tr[subtype=="Deletion Adjustment" & amount > 0,amount:=-amount]
+    
+    # Shorten admin charge description
+    tr$balance <- gsub("Administrative Charge","Admin",tr$balance)
+    
+    # Get Transferred-In Amounts ----------------------------------------------
+    ti<- arrm %>%
+      sqlQuery(source(file="sql/TransferIns.sql"),stringsAsFactors=F) %>%
+      data.table()
+    
+    # Rename columns
+    names(ti) <- names.string
+    
+    # Clean up NAs
+    ti[is.na(amount),amount:=0]
+    ti[is.na(applied),applied:=incurred]
+        
+    
+    # Get Welcome Letters -----------------------------------------------------
+    wl <- arrm %>%
+      sqlQuery(source(file="sql/WelcomeLetters.sql"),stringsAsFactors=F) %>%
+      data.table()
+    
+    # Rename columns
+    names(wl) <- names.string
+    
+    # Clean up NAs
+    wl <- wl[!is.na(applied)]
+    
+    # Get Cases ---------------------------------------------------------------
+    cs <- arrm %>%
+      sqlQuery(source(file="sql/Cases.sql"),stringsAsFactors=F) %>%
+      data.table()
+    
+    # Rename columns
+    names(cs) <- names.string
+    
+    # Remove spaces and forward slashes
+    cs <- cs[,subtype:=gsub(' ','',subtype)]
+    cs <- cs[,subtype:=gsub('\\/','',subtype)]
+        
+    # Get Repayment Plans -----------------------------------------------------
+    rp <- arrm %>%
+      sqlQuery(source(file="sql/RepaymentPlans.sql"),stringsAsFactors=F) %>%
+      data.table()
+    
+    # Rename columns
+    names(rp) <- names.string
+
+    # Get Documents -----------------------------------------------------------
+    dc <- arrm %>%
+      sqlQuery(source(file="sql/Documents.sql"),stringsAsFactors=F) %>%
+      data.table()
+    
+    # Rename columns
+    names(dc) <- names.string
+    
+    # Get Notes ---------------------------------------------------------------
+    nt <- arrm %>%
+      sqlQuery(source(file="sql/ReceivableNotes.sql"),stringsAsFactors=F) %>%
+      data.table()
+    
+    # Rename columns
+    names(nt) <- names.string
+    
+    
+    # Get Receivable Statuses Detail ------------------------------------------
+    rs <- arrm %>%
+      sqlQuery(source(file="sql/ReceivableStatusDetail.sql"),stringsAsFactors=F) %>%
+      data.table()
+
+    # Rename columns
+    names(rs) <- c("receivable","eff.date","isactive")
+    
+    # Fixing Effect Date Field: -----------------------------------------------
+      # For active receivables, the effective status needs to be adjusted to 
+      # the greater of max applied date in transaction table or eff date
+      # of receivable.
+        
+    # Set effective date to 1 day in future if active
+    rs <- rs[isactive==1,eff.date:=as.POSIXct(Sys.Date()+1,tz="EST")]
+    rs <- select(rs,-isactive)
+        
+    # Get max applied date of transactions
+    tr.applied.max <- tr %>%
+      group_by(receivable) %>%
+      summarise(applied=max(applied)) %>%
+      data.table()
+    
+    # Merge with tr and overwrite eff.date if tr$applied date is higher    
+    rs <- merge(rs,tr.applied.max,by="receivable",all.x=TRUE)
+    rs$eff.date <- pmax(rs$eff.date,rs$applied,na.rm = TRUE) # see note
+    rs <- select(rs,-applied)
+        
+    # Note: This is done because the status many of the effective dates 
+    # in the ARRM_RECEIVABLE table are incorrect.
+        
+# Data preparation & cleansing ------------------------------------------------
+    
+    # Merge all imported ARRM tables ------------------------------------------
+    df <- setDT(rbind(tr,ti,wl,cs,rp,dc,nt))
+    df.backup <- df
+    
+    # df <- df.backup
+    
+    # Calculate the number of days between applied and incurred ---------------    
+    df <-df[,Days:=as.numeric(applied-incurred,units="days")]
+    
+    # Remove rows before incur/transfer in date -------------------------------    
+    default.dates <- distinct(select(ti,receivable,default.date=applied))
+    df <- merge(df,default.dates,by=c("receivable"),all.x=TRUE)
+    df <- filter(df,applied >= default.date)
+    df <- setDT(df)
+    
+    # Remove rows after receivable inactive date ------------------------------
+    df <- merge(df,rs,by=c("receivable"),all.x=TRUE,fill=NA)
+    
+    df <- df %>% 
+      mutate(before.inactive = applied <= eff.date) %>%
+      group_by(receivable) %>%
+      mutate(active.cnt = sum(before.inactive==TRUE))
+    
+    # Tidy up -----------------------------------------------------------------
+    df <- select(df,-default.date,-eff.date)
+    rm(list=setdiff(ls(), c("df","df.backup","t1")))
+    for (i in 1:50) gc(reset=TRUE)
+    
+    # Remove spaces and punctuation from subtype column -----------------------
+    df$subtype <- removePunctuation(df$subtype)
+    df$subtype <- gsub(' ','',df$subtype)
+    
+    # Create new features with dcast-------------------------------------------
+    df <- setDT(df)
+    df.balancesubtype <- dcast(df,isactive+receivable+incurred+applied+Days~
+                               balance+type+subtype,fun.aggregate=sum,
+                               sep="_",value.var="amount")
+    
+    df.balancetype <- dcast(df,isactive+receivable+incurred+applied+Days~balance+type,
+                               fun.aggregate=sum,sep="_",value.var="amount")
+    
+    df.balance <- dcast(df,isactive+receivable+incurred+applied+Days~balance,
+                        fun.aggregate=sum,sep="_",value.var="amount")
+    
+    df.type <- dcast(df,isactive+receivable+incurred+applied+Days~type,
+                     fun.aggregate=sum,sep="_",value.var="amount")
+    
+    # Merge new dcast features together --------------------------------------
+    
+    merge.list <- list(df.balancesubtype,df.balancetype,df.balance,df.type)
+    df <- Reduce(function(x,y) merge(x,
+                                     y,
+                                     by=c("isactive",
+                                          "receivable",
+                                          "incurred",
+                                          "applied",
+                                          "Days"),
+                                     all.x=TRUE),merge.list)
+    
+    # Tidy up ----------------------------------------------------------------
+    rm(list=setdiff(ls(), c("df","t1","df.backup")))
+    for (i in 1:50) gc(reset=TRUE)
+    
+    df.backup <- df
+    
+    # Create cumulative variable for the Default Amount
+    df <- setorder(df,Days)
+    df <- df[,Default:=cumsum(Default),by=receivable]
+    
+    # Clean up receivables that have defaults = 0
+    df <- df[Default!=0,]
+    
+    # Tidy up ----------------------------------------------------------------
+    
+    rm(list=setdiff(ls(), c("df")))
+    for (i in 1:50) gc(reset=TRUE)
+    
+    # Calculate ycurrent: cumulative principle recovered -------------------
+    
+    df <- setorder(df,Days)
+    df <- df[,cPrincipal_Recovery:=cumsum(Principal_Recovery),by="receivable"]
+    df <- df[,cPrincipal_Reversal:=cumsum(Principal_Reversal),by="receivable"]
+    df <- df[,cPrincipal_Default:=cumsum(Principal_Default),by="receivable"]
+    df <- df[,cPrincipal_Adjustment:=cumsum(Principal_Adjustment),by="receivable"]
+    df <- df[,cPrincipal_Adjustment_DeletionAdjustment:=cumsum(Principal_Adjustment_DeletionAdjustment),by="receivable"]
+    
+    df <- df[,ycurrent:=-(cPrincipal_Recovery+cPrincipal_Reversal)/(cPrincipal_Default+cPrincipal_Adjustment-cPrincipal_Adjustment_DeletionAdjustment)]
+    
+    df <- setDT(select(df,-starts_with("cPrinc")))
+    
+    # Fix NA values and set bounds of 0 and 1
+    df <- df[is.na(ycurrent),ycurrent:=1]
+    df <- df[ycurrent < 0,ycurrent:=0]
+    df <- df[ycurrent > 1,ycurrent:=1]
+    
+    # Calculate the yfinal variable -------------------------------------------
+    df <- df[,yfinal:=ycurrent[which.max(Days)],by=receivable]
+    
+    
+    # Tidy up ----------------------------------------------------------------
+    rm(list=setdiff(ls(), c("df","t1")))
+    for (i in 1:50) gc(reset=TRUE)
+    
+
+    # Write df to file for development use
+    fwrite(df,"df.csv")
+    

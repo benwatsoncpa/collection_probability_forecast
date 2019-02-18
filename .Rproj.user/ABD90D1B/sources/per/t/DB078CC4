@@ -1,0 +1,22 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1547486530598.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "2973850348",
+    "id" : "DB078CC4",
+    "lastKnownWriteTime" : 1550524552,
+    "last_content_update" : 1550524552,
+    "path" : "~/Github/collection_probability_forecast/Main.R",
+    "project_path" : "Main.R",
+    "properties" : {
+        "cursorPosition" : "37,79",
+        "scrollLine" : "16"
+    },
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}
