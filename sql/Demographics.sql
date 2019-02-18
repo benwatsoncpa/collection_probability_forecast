@@ -1,7 +1,5 @@
 "SELECT
     arrm_receivable.receivable_id,
-    arrm_party.first_nations_status_ind,
-    arrm_party.under_rcmp_investigation_ind,
     arrm_receivable_type.name_eng receivable_type,
     cascom_code.name_eng debtor_type,
     cpf_province.name_eng province,
